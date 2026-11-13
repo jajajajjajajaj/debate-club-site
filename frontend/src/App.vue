@@ -2,7 +2,7 @@
 import { RouterLink, RouterView, useRouter } from 'vue-router'
 import { logout, useAuth } from '@/lib/auth'
 
-const clubName = import.meta.env.VITE_CLUB_NAME || '토론 동아리'
+const clubName = import.meta.env.VITE_CLUB_NAME || '만장일치'
 const { user, isLoggedIn, isAdmin, isReady, mustChangePassword } = useAuth()
 const router = useRouter()
 

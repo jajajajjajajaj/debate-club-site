@@ -6,7 +6,7 @@ import { useAuth } from '@/lib/auth'
 import { addDays, formatDateKey, minutesToLabel, rangeWithinDay, todayKey } from '@/lib/time'
 import type { Reservation } from '@/lib/types'
 
-const clubName = import.meta.env.VITE_CLUB_NAME || '토론 동아리'
+const clubName = import.meta.env.VITE_CLUB_NAME || '만장일치'
 const { user, isLoggedIn, isAdmin } = useAuth()
 
 const today = todayKey()
