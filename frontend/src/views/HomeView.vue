@@ -32,7 +32,8 @@ onMounted(async () => {
 
 <template>
   <div class="page stack">
-    <div>
+    <div class="hero">
+      <img class="hero-logo" src="/logo.png" :alt="clubName" />
       <h1>{{ clubName }}</h1>
       <p v-if="isLoggedIn" class="muted">{{ user?.name }}님, 안녕하세요.</p>
       <template v-else>
@@ -81,6 +82,7 @@ onMounted(async () => {
 </template>
 
 <style scoped>
+.hero-logo { height: 96px; width: auto; display: block; margin-bottom: 8px; }
 .tile { color: var(--text); display: block; }
 .tile:hover { border-color: var(--primary); }
 .today-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
