@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
-import { api, errorMessage } from '@/lib/api'
+import { errorMessage } from '@/lib/api'
+import * as data from '@/lib/data'
 import { useAuth } from '@/lib/auth'
 import { todayKey } from '@/lib/time'
 import { DEBATE_TYPES, type Debate, type MemberStatsRow, type Side } from '@/lib/types'
@@ -28,14 +29,12 @@ async function loadDebates() {
   loading.value = true
   error.value = ''
   try {
-    const data = await api<Debate[]>('/debates', {
-      query: {
-        year: year.value,
-        semester: year.value === '' ? '' : semester.value,
-        debate_type: debateType.value,
-      },
+    const rows = await data.listDebates({
+      year: year.value === '' ? null : year.value,
+      semester: year.value === '' || semester.value === '' ? null : semester.value,
+      debateType: debateType.value,
     })
-    if (token === loadToken) debates.value = data
+    if (token === loadToken) debates.value = rows
   } catch (e) {
     if (token === loadToken) error.value = errorMessage(e)
   } finally {
@@ -67,7 +66,7 @@ const statsError = ref('')
 async function loadStats() {
   statsError.value = ''
   try {
-    stats.value = await api<MemberStatsRow[]>('/members/stats')
+    stats.value = await data.memberStats()
     statsLoaded.value = true
   } catch (e) {
     statsError.value = errorMessage(e)

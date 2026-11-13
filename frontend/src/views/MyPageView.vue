@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { RouterLink } from 'vue-router'
-import { api, errorMessage } from '@/lib/api'
+import { errorMessage } from '@/lib/api'
+import * as data from '@/lib/data'
 import { useAuth } from '@/lib/auth'
 import { SIDE_LABEL, type MyDebateItem } from '@/lib/types'
 
@@ -20,7 +21,7 @@ const winRate = computed(() => {
 
 onMounted(async () => {
   try {
-    debates.value = await api<MyDebateItem[]>('/members/me/debates')
+    debates.value = await data.listMyDebates()
   } catch (e) {
     error.value = errorMessage(e)
   } finally {

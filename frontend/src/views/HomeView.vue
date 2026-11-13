@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import { RouterLink } from 'vue-router'
-import { api } from '@/lib/api'
+import * as data from '@/lib/data'
 import { useAuth } from '@/lib/auth'
 import { addDays, formatDateKey, minutesToLabel, rangeWithinDay, todayKey } from '@/lib/time'
 import type { Reservation } from '@/lib/types'
@@ -21,9 +21,7 @@ const timeRange = (r: Reservation): string => {
 onMounted(async () => {
   if (!isLoggedIn.value) return
   try {
-    todayReservations.value = await api<Reservation[]>('/reservations', {
-      query: { start: today, end: addDays(today, 1) },
-    })
+    todayReservations.value = await data.listReservations(today, addDays(today, 1))
   } catch {
     todayReservations.value = []
   } finally {

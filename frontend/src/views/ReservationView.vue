@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import MonthCalendar from '@/components/MonthCalendar.vue'
-import { api, errorMessage } from '@/lib/api'
+import { errorMessage } from '@/lib/api'
+import * as data from '@/lib/data'
 import { useAuth } from '@/lib/auth'
 import { addDays, formatDateKey, kstDateKey, kstToIso, minutesToLabel, rangeWithinDay, todayKey } from '@/lib/time'
 import type { MyDebateItem, Reservation } from '@/lib/types'
@@ -28,10 +29,8 @@ async function load() {
     const [y, m] = monthFirst.value.split('-').map(Number)
     const next = new Date(Date.UTC(y, m, 1))
     const nextFirst = `${next.getUTCFullYear()}-${String(next.getUTCMonth() + 1).padStart(2, '0')}-01`
-    const data = await api<Reservation[]>('/reservations', {
-      query: { start: addDays(monthFirst.value, -7), end: addDays(nextFirst, 7) },
-    })
-    if (token === loadToken) reservations.value = data
+    const rows = await data.listReservations(addDays(monthFirst.value, -7), addDays(nextFirst, 7))
+    if (token === loadToken) reservations.value = rows
   } catch (e) {
     if (token === loadToken) loadError.value = errorMessage(e)
   } finally {
@@ -114,15 +113,12 @@ async function submit() {
   formNotice.value = ''
   saving.value = true
   try {
-    const result = await api<{ reservation: Reservation; warn_opponent_booked: boolean }>('/reservations', {
-      method: 'POST',
-      body: {
-        title: title.value.trim(),
-        starts_at: kstToIso(selectedDate.value, startMin.value),
-        ends_at: kstToIso(selectedDate.value, endMin.value),
-        debate_id: debateId.value || null,
-        allow_simultaneous: allowSimultaneous.value,
-      },
+    const result = await data.createReservation({
+      title: title.value.trim(),
+      starts_at: kstToIso(selectedDate.value, startMin.value),
+      ends_at: kstToIso(selectedDate.value, endMin.value),
+      debate_id: debateId.value || null,
+      allow_simultaneous: allowSimultaneous.value,
     })
     formNotice.value = result.warn_opponent_booked
       ? '예약했습니다. 참고: 같은 토론의 상대 팀도 이 시간에 예약해 두었습니다.'
@@ -144,7 +140,7 @@ async function cancel(r: Reservation) {
   formError.value = ''
   formNotice.value = ''
   try {
-    await api(`/reservations/${encodeURIComponent(r.id)}`, { method: 'DELETE' })
+    await data.cancelReservation(r.id)
     formNotice.value = '예약을 취소했습니다.'
   } catch (e) {
     formError.value = errorMessage(e)
@@ -155,7 +151,7 @@ async function cancel(r: Reservation) {
 onMounted(async () => {
   void load()
   try {
-    const items = await api<MyDebateItem[]>('/members/me/debates')
+    const items = await data.listMyDebates()
     myDebates.value = items.filter((d) => d.result === 'pending')
   } catch {
     myDebates.value = []

@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { api, errorMessage } from '@/lib/api'
+import { errorMessage } from '@/lib/api'
+import * as data from '@/lib/data'
 import { todayKey } from '@/lib/time'
-import { DEBATE_TYPES, type Debate, type DebateInput, type ParticipantInput, type Profile, type Side } from '@/lib/types'
+import { DEBATE_TYPES, type DebateInput, type ParticipantInput, type Profile, type Side } from '@/lib/types'
 
 const route = useRoute()
 const router = useRouter()
@@ -72,8 +73,7 @@ async function save() {
       topic: form.topic.trim(),
       participants: form.participants.map((p) => ({ ...p })),
     }
-    if (isEdit) await api(`/debates/${encodeURIComponent(debateId)}`, { method: 'PUT', body })
-    else await api('/debates', { method: 'POST', body })
+    await data.saveDebate(isEdit ? debateId : null, body)
     await router.push({ name: 'record' })
   } catch (e) {
     error.value = errorMessage(e)
@@ -88,7 +88,7 @@ async function remove() {
   saving.value = true
   error.value = ''
   try {
-    await api(`/debates/${encodeURIComponent(debateId)}`, { method: 'DELETE' })
+    await data.deleteDebate(debateId)
     await router.push({ name: 'record' })
   } catch (e) {
     error.value = errorMessage(e)
@@ -99,9 +99,9 @@ async function remove() {
 
 onMounted(async () => {
   try {
-    members.value = await api<Profile[]>('/members')
+    members.value = await data.listMembers()
     if (isEdit) {
-      const debate = await api<Debate>(`/debates/${encodeURIComponent(debateId)}`)
+      const debate = await data.getDebate(debateId)
       form.topic = debate.topic
       form.debate_date = debate.debate_date
       form.debate_type = debate.debate_type

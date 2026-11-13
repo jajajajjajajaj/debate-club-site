@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { api, errorMessage } from '@/lib/api'
+import { errorMessage } from '@/lib/api'
+import * as data from '@/lib/data'
 import { useAuth } from '@/lib/auth'
 import type { Profile } from '@/lib/types'
 
@@ -14,7 +15,7 @@ const keyword = ref('')
 
 async function loadMembers() {
   try {
-    members.value = await api<Profile[]>('/members')
+    members.value = await data.listMembers()
   } catch (e) {
     error.value = errorMessage(e)
   } finally {
@@ -37,7 +38,7 @@ async function resetPassword(member: Profile) {
   error.value = ''
   notice.value = ''
   try {
-    await api(`/members/${encodeURIComponent(member.id)}/reset-password`, { method: 'POST' })
+    await data.resetMemberPassword(member.id)
     notice.value = `${member.name} 님의 비밀번호를 학번으로 초기화했습니다. 다음 로그인 때 새 비밀번호를 정하게 됩니다.`
     await loadMembers()
   } catch (e) {
@@ -56,7 +57,7 @@ async function toggleRole(member: Profile) {
   error.value = ''
   notice.value = ''
   try {
-    await api(`/members/${encodeURIComponent(member.id)}/role`, { method: 'PATCH', body: { role: nextRole } })
+    await data.setMemberRole(member.id, nextRole)
     await loadMembers()
   } catch (e) {
     error.value = errorMessage(e)
@@ -71,7 +72,7 @@ async function removeMember(member: Profile) {
   error.value = ''
   notice.value = ''
   try {
-    await api(`/members/${encodeURIComponent(member.id)}`, { method: 'DELETE' })
+    await data.deleteMember(member.id)
     notice.value = `${member.name} 님의 계정을 삭제했습니다.`
     await loadMembers()
   } catch (e) {
