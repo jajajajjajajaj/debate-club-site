@@ -6,10 +6,15 @@ type Phase = {
   name: string
   /** single: 한 사람이 발언 / dual: 양 팀이 각자 시간을 나눠 쓰는 자유토론 */
   kind: 'single' | 'dual'
-  /** single 은 전체 시간, dual 은 팀별 시간 (초) */
+  /** single 은 전체 시간, dual 은 팀별 총 시간 (초) */
   seconds: number
+  /** dual 전용: 1회 최대 발언 시간 (초). 없으면 2분 */
+  turnSeconds?: number
   side: Team | 'none'
 }
+
+const DEFAULT_TURN_SECONDS = 120
+const turnSecondsOf = (p: Phase | undefined): number => p?.turnSeconds ?? DEFAULT_TURN_SECONDS
 
 // 기본 순서와 시간은 예시입니다. 화면의 '순서 편집'에서 동아리 규칙에 맞게 고쳐 쓰세요.
 const DEFAULT_PRESETS: Record<string, Phase[]> = {
@@ -17,7 +22,7 @@ const DEFAULT_PRESETS: Record<string, Phase[]> = {
     { name: '찬성 입론', kind: 'single', seconds: 180, side: 'pro' },
     { name: '반대 입론', kind: 'single', seconds: 180, side: 'con' },
     { name: '작전 시간', kind: 'single', seconds: 120, side: 'none' },
-    { name: '자유토론', kind: 'dual', seconds: 420, side: 'none' },
+    { name: '자유토론', kind: 'dual', seconds: 420, turnSeconds: 120, side: 'none' },
     { name: '작전 시간', kind: 'single', seconds: 120, side: 'none' },
     { name: '반대 최종발언', kind: 'single', seconds: 120, side: 'con' },
     { name: '찬성 최종발언', kind: 'single', seconds: 120, side: 'pro' },
@@ -55,6 +60,10 @@ function loadSaved(): Record<string, Phase[]> {
             name: p.name,
             kind: p.kind === 'dual' ? 'dual' : 'single',
             seconds: Math.max(5, Math.round(p.seconds)),
+            turnSeconds:
+              p.kind === 'dual'
+                ? Math.max(5, Math.round(Number(p.turnSeconds) || DEFAULT_TURN_SECONDS))
+                : undefined,
             side: p.side === 'pro' || p.side === 'con' ? p.side : 'none',
           }))
       }
@@ -84,7 +93,8 @@ function persist() {
 const index = ref(0)
 const running = ref(false)
 const remaining = ref(0) // single
-const teamRemaining = reactive<Record<Team, number>>({ pro: 0, con: 0 }) // dual
+const teamRemaining = reactive<Record<Team, number>>({ pro: 0, con: 0 }) // dual: 팀별 총 시간
+const turnRemaining = ref(0) // dual: 현재 발언(최대 2분) 남은 시간
 const activeTeam = ref<Team>('pro')
 const warned = reactive<Record<string, boolean>>({})
 const editing = ref(false)
@@ -99,6 +109,7 @@ function resetPhase() {
   remaining.value = current.seconds * 1000
   teamRemaining.pro = current.seconds * 1000
   teamRemaining.con = current.seconds * 1000
+  turnRemaining.value = turnSecondsOf(current) * 1000
   activeTeam.value = 'pro'
   for (const key of Object.keys(warned)) delete warned[key]
 }
@@ -166,11 +177,33 @@ function tick() {
 
   if (isDual.value) {
     const team = activeTeam.value
+
+    // 1회 발언(최대 2분) 타이머
+    const beforeTurn = turnRemaining.value
+    turnRemaining.value = Math.max(0, beforeTurn - elapsed)
+    if (beforeTurn > WARNING_MS && turnRemaining.value <= WARNING_MS && !warned.turn) {
+      warned.turn = true
+      bell(1)
+    }
+    const turnJustEnded = beforeTurn > 0 && turnRemaining.value === 0
+
+    // 팀별 총 시간
     teamRemaining[team] = consume(team, teamRemaining[team], elapsed)
+
     if (teamRemaining[team] === 0) {
+      // 이 팀의 총 시간이 끝나면 상대 팀으로 넘어갑니다.
       const other: Team = team === 'pro' ? 'con' : 'pro'
-      if (teamRemaining[other] > 0) activeTeam.value = other
-      else running.value = false
+      if (teamRemaining[other] > 0) {
+        activeTeam.value = other
+        turnRemaining.value = turnSecondsOf(phase.value) * 1000
+        warned.turn = false
+      } else {
+        running.value = false
+      }
+    } else if (turnJustEnded) {
+      // 1회 발언 시간이 끝나면 멈춥니다. (발언권을 넘기거나 다시 시작해야 함)
+      bell(2)
+      running.value = false
     }
   } else {
     remaining.value = consume('single', remaining.value, elapsed)
@@ -182,8 +215,16 @@ function toggle() {
   if (!phase.value) return
   ensureAudio()
   if (!running.value) {
-    const finished = isDual.value ? teamRemaining.pro === 0 && teamRemaining.con === 0 : remaining.value === 0
-    if (finished) return
+    if (isDual.value) {
+      if (teamRemaining.pro === 0 && teamRemaining.con === 0) return
+      // 발언 시간이 끝난 상태에서 다시 시작하면 현재 팀에게 새 발언(2분)을 줍니다.
+      if (turnRemaining.value === 0 && teamRemaining[activeTeam.value] > 0) {
+        turnRemaining.value = turnSecondsOf(phase.value) * 1000
+        warned.turn = false
+      }
+    } else if (remaining.value === 0) {
+      return
+    }
     lastTick = Date.now()
   }
   running.value = !running.value
@@ -193,6 +234,9 @@ function switchTeam(team: Team) {
   if (!isDual.value || teamRemaining[team] === 0) return
   ensureAudio()
   activeTeam.value = team
+  // 발언권을 넘기면 새 발언이 시작되므로 1회 발언 타이머를 다시 채웁니다.
+  turnRemaining.value = turnSecondsOf(phase.value) * 1000
+  warned.turn = false
   if (!running.value) {
     lastTick = Date.now()
     running.value = true
@@ -247,6 +291,25 @@ function setSeconds(p: Phase, value: string) {
   onEdited()
 }
 
+function setTurnMinutes(p: Phase, value: string) {
+  const minutes = Math.max(0, Math.min(99, Math.floor(Number(value) || 0)))
+  p.turnSeconds = Math.max(5, minutes * 60 + (turnSecondsOf(p) % 60))
+  onEdited()
+}
+
+function setTurnSeconds(p: Phase, value: string) {
+  const seconds = Math.max(0, Math.min(59, Math.floor(Number(value) || 0)))
+  p.turnSeconds = Math.max(5, Math.floor(turnSecondsOf(p) / 60) * 60 + seconds)
+  onEdited()
+}
+
+// 방식이 바뀌면 1회 발언 시간 필드를 켜거나 끕니다.
+function onKindChange(p: Phase) {
+  if (p.kind === 'dual' && p.turnSeconds === undefined) p.turnSeconds = DEFAULT_TURN_SECONDS
+  if (p.kind === 'single') p.turnSeconds = undefined
+  onEdited()
+}
+
 function onEdited() {
   persist()
   if (!running.value) resetPhase()
@@ -292,7 +355,7 @@ onBeforeUnmount(() => {
     <div class="page-head">
       <div>
         <h1>토론 타이머</h1>
-        <p class="muted small">종료 30초 전에 종이 한 번, 시간이 끝나면 두 번 울립니다. 스페이스: 시작/정지, ←/→: 순서 이동</p>
+        <p class="muted small">종료 30초 전에 종이 한 번, 시간이 끝나면 두 번 울립니다. 자유토론은 팀 시간과 하단의 1회 발언 타이머가 함께 흐릅니다. 스페이스: 시작/정지, ←/→: 순서 이동</p>
       </div>
       <div class="row">
         <label class="field" style="min-width: 140px">토론 방식
@@ -325,6 +388,10 @@ onBeforeUnmount(() => {
             <span class="small">{{ activeTeam === team && running ? '발언 중' : '눌러서 발언권 넘기기' }}</span>
           </button>
         </div>
+        <div v-if="isDual" class="turn-timer" :class="{ warning: turnRemaining <= WARNING_MS, done: turnRemaining === 0 }">
+          <span class="small muted">이번 발언 · 최대 {{ format(turnSecondsOf(phase) * 1000) }}</span>
+          <span class="clock turn-clock">{{ format(turnRemaining) }}</span>
+        </div>
         <div v-else class="clock big" :class="{ warning: remaining <= WARNING_MS, done: remaining === 0 }" aria-live="off">
           {{ format(remaining) }}
         </div>
@@ -347,7 +414,9 @@ onBeforeUnmount(() => {
             <button type="button" class="phase-item" :class="{ current: i === index }" @click="goTo(i)">
               <span class="badge" :class="{ 'badge-pro': p.side === 'pro', 'badge-con': p.side === 'con' }">{{ sideLabel(p.side) }}</span>
               <span class="grow">{{ p.name }}</span>
-              <span class="muted small">{{ p.kind === 'dual' ? '팀별 ' : '' }}{{ format(p.seconds * 1000) }}</span>
+              <span class="muted small">
+                {{ p.kind === 'dual' ? '팀별 ' : '' }}{{ format(p.seconds * 1000) }}<template v-if="p.kind === 'dual'"> · 1회 {{ format(turnSecondsOf(p) * 1000) }}</template>
+              </span>
             </button>
           </li>
         </ol>
@@ -366,13 +435,17 @@ onBeforeUnmount(() => {
       <div class="table-wrap">
         <table class="table">
           <thead>
-            <tr><th>이름</th><th>방식</th><th>발언 측</th><th>분</th><th>초</th><th></th></tr>
+            <tr>
+              <th>이름</th><th>방식</th><th>발언 측</th>
+              <th>시간(분)</th><th>시간(초)</th>
+              <th>1회 최대(분)</th><th>1회 최대(초)</th><th></th>
+            </tr>
           </thead>
           <tbody>
             <tr v-for="(p, i) in phases" :key="i">
               <td><input v-model="p.name" type="text" maxlength="30" aria-label="순서 이름" @change="onEdited" /></td>
               <td>
-                <select v-model="p.kind" aria-label="방식" @change="onEdited">
+                <select v-model="p.kind" aria-label="방식" @change="onKindChange(p)">
                   <option value="single">한 명 발언</option>
                   <option value="dual">양 팀 시간 나눠 쓰기</option>
                 </select>
@@ -384,8 +457,16 @@ onBeforeUnmount(() => {
                   <option value="none">공통</option>
                 </select>
               </td>
-              <td><input type="number" min="0" max="99" style="width: 72px" aria-label="분" :value="Math.floor(p.seconds / 60)" @change="setMinutes(p, ($event.target as HTMLInputElement).value)" /></td>
-              <td><input type="number" min="0" max="59" style="width: 72px" aria-label="초" :value="p.seconds % 60" @change="setSeconds(p, ($event.target as HTMLInputElement).value)" /></td>
+              <td><input type="number" min="0" max="99" style="width: 68px" aria-label="시간(분)" :value="Math.floor(p.seconds / 60)" @change="setMinutes(p, ($event.target as HTMLInputElement).value)" /></td>
+              <td><input type="number" min="0" max="59" style="width: 68px" aria-label="시간(초)" :value="p.seconds % 60" @change="setSeconds(p, ($event.target as HTMLInputElement).value)" /></td>
+              <td>
+                <input v-if="p.kind === 'dual'" type="number" min="0" max="99" style="width: 68px" aria-label="1회 최대(분)" :value="Math.floor(turnSecondsOf(p) / 60)" @change="setTurnMinutes(p, ($event.target as HTMLInputElement).value)" />
+                <span v-else class="muted">—</span>
+              </td>
+              <td>
+                <input v-if="p.kind === 'dual'" type="number" min="0" max="59" style="width: 68px" aria-label="1회 최대(초)" :value="turnSecondsOf(p) % 60" @change="setTurnSeconds(p, ($event.target as HTMLInputElement).value)" />
+                <span v-else class="muted">—</span>
+              </td>
               <td>
                 <div class="row" style="flex-wrap: nowrap">
                   <button class="btn btn-sm" type="button" aria-label="위로" :disabled="i === 0" @click="movePhase(i, -1)">↑</button>
@@ -415,6 +496,12 @@ onBeforeUnmount(() => {
 .controls { justify-content: center; margin-top: 20px; }
 .start { min-width: 120px; font-size: 17px; padding: 12px 20px; }
 .dual { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px; }
+.turn-timer { margin-top: 14px; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius); display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.turn-timer.warning { border-color: var(--warn); background: var(--warn-soft); }
+.turn-timer.done { border-color: var(--danger); background: var(--con-soft); }
+.turn-clock { font-size: clamp(36px, 8vw, 72px); }
+.turn-timer.warning .turn-clock { color: var(--warn); }
+.turn-timer.done .turn-clock { color: var(--danger); }
 .team {
   font: inherit; cursor: pointer; border-radius: var(--radius); padding: 20px 8px; border: 2px solid var(--border);
   background: #fff; display: flex; flex-direction: column; align-items: center; gap: 6px; color: var(--text);
